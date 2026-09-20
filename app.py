@@ -32,10 +32,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Hindi Revision & Mock Test App (Anti-Duplicate Enabled)")
+st.title("AI Smart Hindi Revision & Mock Test App (Error-Free)")
 st.markdown(
-    "Apne notes upload karein. App automatic check karega ki koi sawal repeat"
-    " na ho, sirf **naye sawal** hi **SHUDH HINDI** mein judenge!"
+    "Apne notes upload karein. App bina kisi truncation error ke **SHUDH"
+    " HINDI** mein naye sawal jodne ke liye tayar hai!"
 )
 
 # Sidebar
@@ -70,8 +70,8 @@ with st.sidebar:
     )
 
   st.info(
-      "💡 Note: Duplicate questions automatically filter ho jayenge. Sirf naye"
-      " questions bank mein add honge!"
+      "💡 Note: Duplicate questions automatically filter ho jayenge. Agar zyada"
+      " sawal chahiye toh button ko do baar click kar sakte hain!"
   )
   build_bank_btn = st.button("Smart Questions Jodein")
 
@@ -98,7 +98,7 @@ def call_gemini_with_retry(client, model, contents, config, max_retries=3):
       raise e
 
 
-# Handle Question Bank Generation with Duplicate Prevention
+# Handle Question Bank Generation safely
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -108,16 +108,15 @@ if build_bank_btn:
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   else:
     with st.spinner(
-        "AI aapke notes ko padh raha hai aur duplicate filter karke naye HINDI"
-        " questions jod raha hai..."
+        "AI aapke notes ko padh raha hai aur HINDI questions jod raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
         prompt = f"""
-                You are an expert exam creator and educator. Thoroughly and exhaustively analyze all the provided study notes, images, and documents. 
+                You are an expert exam creator and educator. Analyze the provided study notes, images, and documents thoroughly. 
                 CRITICAL INSTRUCTIONS:
-                1. Capture maximum possible multiple-choice questions (MCQs) covering every topic, date, fact, and table comprehensively.
+                1. Generate a robust, high-quality batch of multiple-choice questions (MCQs) covering all visible topics, facts, and dates. Ensure the JSON output is complete and well-formed without getting cut off.
                 2. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -171,7 +170,7 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database using INSERT OR IGNORE (Prevents Duplicates)
+        # Save to SQLite Database using INSERT OR IGNORE
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         added_count = 0
@@ -189,15 +188,19 @@ if build_bank_btn:
                   q["explanation"],
               ),
           )
-          if cursor.rowcount > 0:  # Means row was actually inserted (new)
+          if cursor.rowcount > 0:
             added_count += 1
 
         conn.commit()
         conn.close()
         st.success(
             f"Safaltapoorvak {added_count} naye unique prashn HINDI mein jod"
-            " diye gaye hain! (Purane duplicate questions apne aap skip ho"
-            " gaye)."
+            " diye gaye hain!"
+        )
+      except json.JSONDecodeError:
+        st.error(
+            "Error: AI response thoda lamba hone ke कारण format beech mein cut"
+            " gaya. Kripya 'Smart Questions Jodein' par dobara click karein!"
         )
       except Exception as e:
         st.error(
@@ -234,7 +237,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni files dekar Question Bank banayein!")
+    st.warning("Pehle sidebar से अपनी files देकर Question Bank बनाएं!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -289,7 +292,7 @@ if st.session_state.current_test:
           index=None,
           disabled=st.session_state.test_submitted,
       )
-      st.session_space.test_answers[q["id"]] = ans
+      st.session_state.test_answers[q["id"]] = ans
       st.markdown("---")
 
     submit_btn = st.form_submit_button("Test Submit Karein")
