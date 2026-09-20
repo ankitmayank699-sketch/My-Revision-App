@@ -32,11 +32,11 @@ def init_db():
 
 init_db()
 
-st.title("AI Ultimate Hindi Revision & Mock Test App (Multi-Image & PDF Support)")
+st.title("AI Ultimate Hindi Revision & Mock Test App (Full Data Capture)")
 st.markdown(
-    "Apne haath se likhe notes ki **kai saari photos ya PDF** ek sath upload"
-    " karein. AI ek bhi point nahi chhodega aur **SHUDH HINDI** mein Question"
-    " Bank banayega!"
+    "Apne sabhi notes ki photos ya PDF upload karein. AI ab **maximum limit"
+    " (8192 tokens)** ke sath ek bhi point chhode bina **SHUDH HINDI** mein"
+    " exhaustive Question Bank banayega!"
 )
 
 # Sidebar
@@ -65,25 +65,27 @@ with st.sidebar:
     )
   else:
     uploaded_files = st.file_uploader(
-        "Apne notes ki Photos (JPG/PNG) ya PDF select karein (Aap ek sath kai"
-        " files chun sakte hain)",
+        "Apne notes ki Photos (JPG/PNG) ya PDF select karein (Aap jitni chahein"
+        " files ek sath chun sakte hain)",
         type=["pdf", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
 
   st.info(
-      "💡 Note: Purane questions delete nahi honge, naye questions usi bank mein"
+      "💡 Note: Purane questions safe rahenge, naye questions usi bank mein aur"
       " jud jayenge!"
   )
   build_bank_btn = st.button("Complete Hindi Question Bank Banayein")
 
 
 # Function with auto-retry for 503 errors
-def call_gemini_with_retry(client, model, contents, max_retries=3):
+def call_gemini_with_retry(client, model, contents, config, max_retries=3):
   delay = 3
   for attempt in range(max_retries):
     try:
-      return client.models.generate_content(model=model, contents=contents)
+      return client.models.generate_content(
+          model=model, contents=contents, config=config
+      )
     except Exception as e:
       error_str = str(e)
       if (
@@ -98,7 +100,7 @@ def call_gemini_with_retry(client, model, contents, max_retries=3):
       raise e
 
 
-# Handle Question Bank Generation (Safe Append Mode in Hindi with Multi-File support)
+# Handle Question Bank Generation
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -108,19 +110,19 @@ if build_bank_btn:
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   else:
     with st.spinner(
-        "AI aapke sabhi notes/photos ko gahrai se padh raha hai aur HINDI mein"
-        " exhaustive Question Bank bana raha hai..."
+        "AI aapke sabhi notes aur images ko ek-ek karke gahrai se padh raha"
+        " hai aur saare prashn taiyar kar raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
-        # Exhaustive Hindi Prompt ensuring zero omissions
+        # High-capacity exhaustive prompt for zero data loss
         prompt = f"""
-                You are an expert exam creator and educator. Thoroughly and exhaustively analyze all the provided study notes (images and/or documents). 
-                CRITICAL REQUIREMENT: 
-                1. Ensure 100% data completeness. Do not skip any single topic, fact, date, table, scheme, or data point present in the notes.
-                2. Generate as many diverse multiple-choice questions (MCQs) as needed to cover everything comprehensively.
-                3. All questions, 4 options, correct answer strings, and detailed explanations must be written STRICTLY in the HINDI language (हिंदी भाषा में).
+                You are an expert exam creator and educator. Thoroughly and exhaustively analyze all the provided study notes, images, and documents. 
+                CRITICAL INSTRUCTIONS:
+                1. 100% Data Coverage: Do not skip any single topic, subheading, fact, date, table row, scheme, name, or data point present in the notes or images.
+                2. Generate as many comprehensive multiple-choice questions (MCQs) as required to cover everything completely.
+                3. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
                 [
@@ -132,6 +134,11 @@ if build_bank_btn:
                   }}
                 ]
                 """
+
+        # Setting config to maximum output tokens to prevent truncation
+        generation_config = types.GenerateContentConfig(
+            max_output_tokens=8192, temperature=0.2
+        )
 
         if (
             upload_option == "Files (PDF/Images) Upload karein"
@@ -147,12 +154,18 @@ if build_bank_btn:
           contents_list.append(prompt)
 
           response = call_gemini_with_retry(
-              client, "gemini-3.6-flash", contents_list
+              client,
+              "gemini-3.6-flash",
+              contents_list,
+              config=generation_config,
           )
         else:
-          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:30000]}"
+          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:50000]}"
           response = call_gemini_with_retry(
-              client, "gemini-3.6-flash", full_prompt
+              client,
+              "gemini-3.6-flash",
+              full_prompt,
+              config=generation_config,
           )
 
         text_resp = response.text.strip()
@@ -163,7 +176,7 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database (Append Mode - No data loss)
+        # Save to SQLite Database (Append Mode)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         for q in questions_list:
@@ -187,8 +200,8 @@ if build_bank_btn:
         )
       except Exception as e:
         st.error(
-            f"Error: {e}. (Server par jyada load hai, kripya 1 minute baad"
-            " dobara koshish karein.)"
+            f"Error: {e}. (Data bahut bada hone par kripya thoda kam files ek"
+            " sath upload karein ya dobara koshish karein.)"
         )
 
 # Check Database stats
@@ -321,6 +334,6 @@ if st.session_state.test_submitted and st.session_state.current_test:
           f" `{correct_ans}`\n\n**Spashtikaran:** {q['explanation']}"
       )
 
-  st.markdown("---")
+  st.markdown---()
   st.markdown("### Aapka Kul Score")
   st.metric(label="Score", value=f"{score} / {total}")
