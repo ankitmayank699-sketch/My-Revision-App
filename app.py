@@ -6,9 +6,7 @@ from google import genai
 from google.genai import types
 
 st.set_page_config(
-    page_title="AI Hindi Revision & Mock Test App",
-    page_icon="📚",
-    layout="wide",
+    page_title="AI Ultimate Hindi Revision App", page_icon="📚", layout="wide"
 )
 
 # Database setup for Question Bank
@@ -34,10 +32,11 @@ def init_db():
 
 init_db()
 
-st.title("AI Hindi Revision & Mock Test App (Hindi Questions Supported)")
+st.title("AI Ultimate Hindi Revision & Mock Test App (Multi-Image & PDF Support)")
 st.markdown(
-    "Apne notes upload karein. AI ab sabhi prashn, vikalp aur explanation"
-    " **SHUDH HINDI** mein taiyar karega!"
+    "Apne haath se likhe notes ki **kai saari photos ya PDF** ek sath upload"
+    " karein. AI ek bhi point nahi chhodega aur **SHUDH HINDI** mein Question"
+    " Bank banayega!"
 )
 
 # Sidebar
@@ -52,11 +51,11 @@ with st.sidebar:
   st.markdown("---")
   st.subheader("Apne notes yahan dein:")
   upload_option = st.radio(
-      "Notes ka tarika:", ("Text paste karein", "PDF upload karein")
+      "Notes ka tarika:", ("Text paste karein", "Files (PDF/Images) Upload karein")
   )
 
   notes_text = ""
-  uploaded_file = None
+  uploaded_files = None
 
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
@@ -65,11 +64,18 @@ with st.sidebar:
         placeholder="Apne vishay ke notes yahan likhein...",
     )
   else:
-    uploaded_file = st.file_uploader(
-        "Haath se likhe notes ki PDF upload karein", type=["pdf"]
+    uploaded_files = st.file_uploader(
+        "Apne notes ki Photos (JPG/PNG) ya PDF select karein (Aap ek sath kai"
+        " files chun sakte hain)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
     )
 
-  build_bank_btn = st.button("Hindi Question Bank Banayein")
+  st.info(
+      "💡 Note: Purane questions delete nahi honge, naye questions usi bank mein"
+      " jud jayenge!"
+  )
+  build_bank_btn = st.button("Complete Hindi Question Bank Banayein")
 
 
 # Function with auto-retry for 503 errors
@@ -92,27 +98,29 @@ def call_gemini_with_retry(client, model, contents, max_retries=3):
       raise e
 
 
-# Handle Question Bank Generation (Safe Append Mode in Hindi)
+# Handle Question Bank Generation (Safe Append Mode in Hindi with Multi-File support)
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
   elif upload_option == "Text paste karein" and not notes_text.strip():
     st.error("Kripya notes darj karein!")
-  elif upload_option == "PDF upload karein" and uploaded_file is None:
-    st.error("Kripya PDF file upload karein!")
+  elif upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files:
+    st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   else:
     with st.spinner(
-        "AI aapke notes ko padh raha hai aur HINDI mein questions taiyar kar"
-        " raha hai..."
+        "AI aapke sabhi notes/photos ko gahrai se padh raha hai aur HINDI mein"
+        " exhaustive Question Bank bana raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
-        # STRICT HINDI PROMPT
+        # Exhaustive Hindi Prompt ensuring zero omissions
         prompt = f"""
-                You are an expert exam creator and educator. Thoroughly analyze the provided study notes. 
-                CRITICAL REQUIREMENT: Generate all multiple-choice questions (MCQs), options, correct answer strings, and detailed explanations STRICTLY in the HINDI language (हिंदी भाषा में).
-                Ensure every single question, all 4 options, the correct answer, and the explanation are fully written in Hindi script.
+                You are an expert exam creator and educator. Thoroughly and exhaustively analyze all the provided study notes (images and/or documents). 
+                CRITICAL REQUIREMENT: 
+                1. Ensure 100% data completeness. Do not skip any single topic, fact, date, table, scheme, or data point present in the notes.
+                2. Generate as many diverse multiple-choice questions (MCQs) as needed to cover everything comprehensively.
+                3. All questions, 4 options, correct answer strings, and detailed explanations must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
                 [
@@ -125,17 +133,21 @@ if build_bank_btn:
                 ]
                 """
 
-        if upload_option == "PDF upload karein" and uploaded_file is not None:
-          pdf_bytes = uploaded_file.getvalue()
+        if (
+            upload_option == "Files (PDF/Images) Upload karein"
+            and uploaded_files
+        ):
+          contents_list = []
+          for file in uploaded_files:
+            file_bytes = file.getvalue()
+            mime_type = file.type
+            contents_list.append(
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+            )
+          contents_list.append(prompt)
+
           response = call_gemini_with_retry(
-              client,
-              "gemini-3.6-flash",
-              [
-                  types.Part.from_bytes(
-                      data=pdf_bytes, mime_type="application/pdf"
-                  ),
-                  prompt,
-              ],
+              client, "gemini-3.6-flash", contents_list
           )
         else:
           full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:30000]}"
@@ -151,7 +163,7 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database
+        # Save to SQLite Database (Append Mode - No data loss)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         for q in questions_list:
@@ -209,7 +221,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni PDF dekar Question Bank banayein!")
+    st.warning("Pehle sidebar se apni files dekar Question Bank banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
