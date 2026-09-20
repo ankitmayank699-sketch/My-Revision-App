@@ -1,12 +1,14 @@
-
 import json
 import sqlite3
+import time
 import streamlit as st
 from google import genai
 from google.genai import types
 
 st.set_page_config(
-    page_title="AI Smart Mock Test App", page_icon="📝", layout="wide"
+    page_title="AI Hindi Revision & Mock Test App",
+    page_icon="📚",
+    layout="wide",
 )
 
 # Database setup for Question Bank
@@ -32,10 +34,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Mock Test & Revision App (Handwritten Notes Supported)")
+st.title("AI Hindi Revision & Mock Test App (Hindi Questions Supported)")
 st.markdown(
-    "Apne haath se likhe notes ki photo wali PDF upload karein, AI use"
-    " direct padh kar smart Question Bank bana dega!"
+    "Apne notes upload karein. AI ab sabhi prashn, vikalp aur explanation"
+    " **SHUDH HINDI** mein taiyar karega!"
 )
 
 # Sidebar
@@ -67,12 +69,30 @@ with st.sidebar:
         "Haath se likhe notes ki PDF upload karein", type=["pdf"]
     )
 
-  pool_size = st.slider(
-      "Question Bank mein kul kitne prashn banayein?", 50, 200, 100, step=50
-  )
-  build_bank_btn = st.button("Smart Question Bank Banayein")
+  build_bank_btn = st.button("Hindi Question Bank Banayein")
 
-# Handle Question Bank Generation
+
+# Function with auto-retry for 503 errors
+def call_gemini_with_retry(client, model, contents, max_retries=3):
+  delay = 3
+  for attempt in range(max_retries):
+    try:
+      return client.models.generate_content(model=model, contents=contents)
+    except Exception as e:
+      error_str = str(e)
+      if (
+          "503" in error_str
+          or "UNAVAILABLE" in error_str
+          or "high demand" in error_str
+      ):
+        if attempt < max_retries - 1:
+          time.sleep(delay)
+          delay *= 2
+          continue
+      raise e
+
+
+# Handle Question Bank Generation (Safe Append Mode in Hindi)
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -82,32 +102,35 @@ if build_bank_btn:
     st.error("Kripya PDF file upload karein!")
   else:
     with st.spinner(
-        "AI aapke haath se likhe notes ki PDF ko padh raha hai aur Question"
-        " Bank taiyar kar raha hai..."
+        "AI aapke notes ko padh raha hai aur HINDI mein questions taiyar kar"
+        " raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
+        # STRICT HINDI PROMPT
         prompt = f"""
-                You are an expert exam creator. Based on the provided study notes (which may contain handwritten text or images), analyze them thoroughly and generate exactly {pool_size} diverse multiple-choice questions (MCQs) covering all topics in strict JSON format. 
-                Each question must have 4 options, the correct option string (exact match with one of the options), and a detailed explanation.
+                You are an expert exam creator and educator. Thoroughly analyze the provided study notes. 
+                CRITICAL REQUIREMENT: Generate all multiple-choice questions (MCQs), options, correct answer strings, and detailed explanations STRICTLY in the HINDI language (हिंदी भाषा में).
+                Ensure every single question, all 4 options, the correct answer, and the explanation are fully written in Hindi script.
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
                 [
                   {{
-                    "question": "Question text here?",
-                    "options": ["Option A", "Option B", "Option C", "Option D"],
-                    "correct": "Option A",
-                    "explanation": "Detailed explanation here."
+                    "question": "Question text in Hindi?",
+                    "options": ["Option A in Hindi", "Option B in Hindi", "Option C in Hindi", "Option D in Hindi"],
+                    "correct": "Option A in Hindi",
+                    "explanation": "Detailed explanation in Hindi."
                   }}
                 ]
                 """
 
         if upload_option == "PDF upload karein" and uploaded_file is not None:
           pdf_bytes = uploaded_file.getvalue()
-          response = client.models.generate_content(
-              model="gemini-3.6-flash",
-              contents=[
+          response = call_gemini_with_retry(
+              client,
+              "gemini-3.6-flash",
+              [
                   types.Part.from_bytes(
                       data=pdf_bytes, mime_type="application/pdf"
                   ),
@@ -115,10 +138,9 @@ if build_bank_btn:
               ],
           )
         else:
-          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:25000]}"
-          response = client.models.generate_content(
-              model="gemini-3.6-flash",
-              contents=full_prompt,
+          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:30000]}"
+          response = call_gemini_with_retry(
+              client, "gemini-3.6-flash", full_prompt
           )
 
         text_resp = response.text.strip()
@@ -132,7 +154,6 @@ if build_bank_btn:
         # Save to SQLite Database
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM questions")  # Purana bank clear karein
         for q in questions_list:
           cursor.execute(
               """
@@ -149,11 +170,14 @@ if build_bank_btn:
         conn.commit()
         conn.close()
         st.success(
-            f"Safaltapoorvak {len(questions_list)} prashnon ka Smart Question"
-            " Bank taiyar ho gaya hai!"
+            f"Safaltapoorvak {len(questions_list)} naye prashn HINDI mein"
+            " Question Bank mein jud gaye hain!"
         )
       except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(
+            f"Error: {e}. (Server par jyada load hai, kripya 1 minute baad"
+            " dobara koshish karein.)"
+        )
 
 # Check Database stats
 conn = sqlite3.connect(DB_FILE)
@@ -173,7 +197,7 @@ col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
 # Daily Test Section
 st.markdown("---")
 st.subheader("Daily Mock Test (No-Repeat Mode)")
-test_size = st.slider("Aaj ke test mein kitne prashn chahiye?", 10, 50, 40)
+test_size = st.slider("Aaj ke test mein kitne prashn chahiye?", 10, 60, 40)
 start_test_btn = st.button("Aaj ka Naya Test Shuru Karein")
 
 if "current_test" not in st.session_state:
@@ -185,7 +209,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni PDF dekar 'Smart Question Bank' banayein!")
+    st.warning("Pehle sidebar se apni PDF dekar Question Bank banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
