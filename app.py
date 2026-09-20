@@ -105,7 +105,7 @@ if build_bank_btn:
         if upload_option == "PDF upload karein" and uploaded_file is not None:
           pdf_bytes = uploaded_file.getvalue()
           response = client.models.generate_content(
-              model="gemini-2.5-flash",
+              model="gemini-3.6-flash",
               contents=[
                   types.Part.from_bytes(
                       data=pdf_bytes, mime_type="application/pdf"
@@ -116,7 +116,7 @@ if build_bank_btn:
         else:
           full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:25000]}"
           response = client.models.generate_content(
-              model="gemini-2.5-flash",
+              model="gemini-3.6-flash",
               contents=full_prompt,
           )
 
