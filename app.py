@@ -9,19 +9,6 @@ st.set_page_config(
     page_title="AI Smart Hindi Revision App", page_icon="📚", layout="wide"
 )
 
-# Force White Background CSS
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-color: #FFFFFF;
-        color: #000000;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # Database setup with UNIQUE constraint to prevent duplicates
 DB_FILE = "question_bank.db"
 
@@ -91,8 +78,8 @@ with st.sidebar:
     camera_file = st.camera_input("Apne notes ki photo khinchein")
 
   st.info(
-      "💡 Note: Duplicate questions automatically filter ho jayenge. Sirf naye"
-      " unique sawal judenge!"
+      "💡 Note: Duplicate questions automatically filter ho jayenge. Har"
+      " diya gaya data point capture hoga!"
   )
   build_bank_btn = st.button("Smart Questions Jodein")
 
@@ -119,7 +106,7 @@ def call_gemini_with_retry(client, model, contents, config, max_retries=3):
       raise e
 
 
-# Handle Question Bank Generation safely
+# Handle Question Bank Generation safely with 100% data coverage instruction
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -130,18 +117,19 @@ if build_bank_btn:
   ):
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   elif upload_option == "Camera se Photo Khinchein" and camera_file is None:
-    st.error("Kripya pehle camera से photo khinchein!")
+    st.error("Kripya pehle camera se photo khinchein!")
   else:
     with st.spinner(
-        "AI aapke data ko padh raha hai aur HINDI questions jod raha hai..."
+        "AI aapke poore data ko ek-ek karke padh raha hai aur HINDI questions"
+        " jod raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
         prompt = f"""
-                You are an expert exam creator and educator. Thoroughly analyze all the provided study notes, images, camera captures, and documents. 
+                You are an expert exam creator and educator. Thoroughly and exhaustively analyze ALL the provided study notes, images, camera captures, and documents. 
                 CRITICAL INSTRUCTIONS:
-                1. Generate a comprehensive batch of multiple-choice questions (MCQs) covering as many topics, dates, facts, and tables as possible. Ensure JSON output is well-formed.
+                1. 100% Complete Coverage: Convert EVERY single question, fact, topic, date, or item present in the input data into an MCQ. Do not skip a single item (if 10 items are given, ensure all 10 are converted into questions).
                 2. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -156,7 +144,7 @@ if build_bank_btn:
                 """
 
         generation_config = types.GenerateContentConfig(
-            max_output_tokens=8192, temperature=0.3
+            max_output_tokens=8192, temperature=0.2
         )
 
         contents_list = []
