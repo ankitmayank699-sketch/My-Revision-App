@@ -5,7 +5,9 @@ from google import genai
 from google.genai import types
 
 st.set_page_config(
-    page_title="AI Smart Mock Test App", page_icon="📝", layout="wide"
+    page_title="AI Safe Revision & Mock Test App",
+    page_icon="📚",
+    layout="wide",
 )
 
 # Database setup for Question Bank
@@ -31,10 +33,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Mock Test & Revision App (Handwritten Notes Supported)")
+st.title("AI Safe Revision & Mock Test App (No Data Loss)")
 st.markdown(
-    "Apne haath se likhe notes ki photo wali PDF upload karein, AI use"
-    " direct padh kar smart Question Bank bana dega!"
+    "Apne naye notes upload karein, purane questions delete nahi honge balki"
+    " naye questions bhi usi bank mein jud jayenge!"
 )
 
 # Sidebar
@@ -66,12 +68,13 @@ with st.sidebar:
         "Haath se likhe notes ki PDF upload karein", type=["pdf"]
     )
 
-  pool_size = st.slider(
-      "Question Bank mein kul kitne prashn banayein?", 50, 200, 100, step=50
+  st.info(
+      "💡 Note: Ab naye notes upload karne par purane questions delete nahi"
+      " honge, sirf naye judenge!"
   )
-  build_bank_btn = st.button("Smart Question Bank Banayein")
+  build_bank_btn = st.button("Question Bank mein Naye Sawal Jodein")
 
-# Handle Question Bank Generation
+# Handle Question Bank Generation (Safe Append Mode)
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -81,14 +84,13 @@ if build_bank_btn:
     st.error("Kripya PDF file upload karein!")
   else:
     with st.spinner(
-        "AI aapke haath se likhe notes ki PDF ko padh raha hai aur Question"
-        " Bank taiyar kar raha hai..."
+        "AI aapke notes ko analyze karke naye questions add kar raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
         prompt = f"""
-                You are an expert exam creator. Based on the provided study notes (which may contain handwritten text or images), analyze them thoroughly and generate exactly {pool_size} diverse multiple-choice questions (MCQs) covering all topics in strict JSON format. 
+                You are an expert exam creator and educator. Thoroughly analyze the provided study notes. Generate diverse multiple-choice questions (MCQs) covering all topics, facts, and data points present in the notes.
                 Each question must have 4 options, the correct option string (exact match with one of the options), and a detailed explanation.
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -114,7 +116,7 @@ if build_bank_btn:
               ],
           )
         else:
-          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:25000]}"
+          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:30000]}"
           response = client.models.generate_content(
               model="gemini-3.6-flash",
               contents=full_prompt,
@@ -128,10 +130,9 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database
+        # Save to SQLite Database WITHOUT deleting old data (Append mode)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM questions")  # Purana bank clear karein
         for q in questions_list:
           cursor.execute(
               """
@@ -148,8 +149,8 @@ if build_bank_btn:
         conn.commit()
         conn.close()
         st.success(
-            f"Safaltapoorvak {len(questions_list)} prashnon ka Smart Question"
-            " Bank taiyar ho gaya hai!"
+            f"Safaltapoorvak {len(questions_list)} naye prashn Question Bank mein"
+            " jod diye gaye hain!"
         )
       except Exception as e:
         st.error(f"Error: {e}")
@@ -172,7 +173,7 @@ col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
 # Daily Test Section
 st.markdown("---")
 st.subheader("Daily Mock Test (No-Repeat Mode)")
-test_size = st.slider("Aaj ke test mein kitne prashn chahiye?", 10, 50, 40)
+test_size = st.slider("Aaj ke test mein kitne prashn chahiye?", 10, 60, 40)
 start_test_btn = st.button("Aaj ka Naya Test Shuru Karein")
 
 if "current_test" not in st.session_state:
@@ -184,7 +185,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni PDF dekar 'Smart Question Bank' banayein!")
+    st.warning("Pehle sidebar se apni PDF dekar Question Bank banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
