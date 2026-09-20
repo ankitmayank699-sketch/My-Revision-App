@@ -6,10 +6,10 @@ from google import genai
 from google.genai import types
 
 st.set_page_config(
-    page_title="AI Ultimate Hindi Revision App", page_icon="📚", layout="wide"
+    page_title="AI Smart Hindi Revision App", page_icon="📚", layout="wide"
 )
 
-# Database setup for Question Bank
+# Database setup with UNIQUE constraint to prevent duplicates
 DB_FILE = "question_bank.db"
 
 
@@ -19,7 +19,7 @@ def init_db():
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT,
+            question TEXT UNIQUE,
             options TEXT,
             correct TEXT,
             explanation TEXT,
@@ -32,11 +32,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Ultimate Hindi Revision & Mock Test App (Full Data Capture)")
+st.title("AI Smart Hindi Revision & Mock Test App (Anti-Duplicate Enabled)")
 st.markdown(
-    "Apne sabhi notes ki photos ya PDF upload karein. AI ab **maximum limit"
-    " (8192 tokens)** ke sath ek bhi point chhode bina **SHUDH HINDI** mein"
-    " exhaustive Question Bank banayega!"
+    "Apne notes upload karein. App automatic check karega ki koi sawal repeat"
+    " na ho, sirf **naye sawal** hi **SHUDH HINDI** mein judenge!"
 )
 
 # Sidebar
@@ -65,17 +64,16 @@ with st.sidebar:
     )
   else:
     uploaded_files = st.file_uploader(
-        "Apne notes ki Photos (JPG/PNG) ya PDF select karein (Aap jitni chahein"
-        " files ek sath chun sakte hain)",
+        "Apne notes ki Photos (JPG/PNG) ya PDF select karein",
         type=["pdf", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
 
   st.info(
-      "💡 Note: Purane questions safe rahenge, naye questions usi bank mein aur"
-      " jud jayenge!"
+      "💡 Note: Duplicate questions automatically filter ho jayenge. Sirf naye"
+      " questions bank mein add honge!"
   )
-  build_bank_btn = st.button("Complete Hindi Question Bank Banayein")
+  build_bank_btn = st.button("Smart Questions Jodein")
 
 
 # Function with auto-retry for 503 errors
@@ -100,7 +98,7 @@ def call_gemini_with_retry(client, model, contents, config, max_retries=3):
       raise e
 
 
-# Handle Question Bank Generation
+# Handle Question Bank Generation with Duplicate Prevention
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
@@ -110,19 +108,17 @@ if build_bank_btn:
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   else:
     with st.spinner(
-        "AI aapke sabhi notes aur images ko ek-ek karke gahrai se padh raha"
-        " hai aur saare prashn taiyar kar raha hai..."
+        "AI aapke notes ko padh raha hai aur duplicate filter karke naye HINDI"
+        " questions jod raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
-        # High-capacity exhaustive prompt for zero data loss
         prompt = f"""
                 You are an expert exam creator and educator. Thoroughly and exhaustively analyze all the provided study notes, images, and documents. 
                 CRITICAL INSTRUCTIONS:
-                1. 100% Data Coverage: Do not skip any single topic, subheading, fact, date, table row, scheme, name, or data point present in the notes or images.
-                2. Generate as many comprehensive multiple-choice questions (MCQs) as required to cover everything completely.
-                3. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
+                1. Capture maximum possible multiple-choice questions (MCQs) covering every topic, date, fact, and table comprehensively.
+                2. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
                 [
@@ -135,9 +131,8 @@ if build_bank_btn:
                 ]
                 """
 
-        # Setting config to maximum output tokens to prevent truncation
         generation_config = types.GenerateContentConfig(
-            max_output_tokens=8192, temperature=0.2
+            max_output_tokens=8192, temperature=0.3
         )
 
         if (
@@ -176,13 +171,15 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database (Append Mode)
+        # Save to SQLite Database using INSERT OR IGNORE (Prevents Duplicates)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
+        added_count = 0
+
         for q in questions_list:
           cursor.execute(
               """
-                        INSERT INTO questions (question, options, correct, explanation, asked)
+                        INSERT OR IGNORE INTO questions (question, options, correct, explanation, asked)
                         VALUES (?, ?, ?, ?, 0)
                     """,
               (
@@ -192,16 +189,19 @@ if build_bank_btn:
                   q["explanation"],
               ),
           )
+          if cursor.rowcount > 0:  # Means row was actually inserted (new)
+            added_count += 1
+
         conn.commit()
         conn.close()
         st.success(
-            f"Safaltapoorvak {len(questions_list)} naye prashn HINDI mein"
-            " Question Bank mein jud gaye hain!"
+            f"Safaltapoorvak {added_count} naye unique prashn HINDI mein jod"
+            " diye gaye hain! (Purane duplicate questions apne aap skip ho"
+            " gaye)."
         )
       except Exception as e:
         st.error(
-            f"Error: {e}. (Data bahut bada hone par kripya thoda kam files ek"
-            " sath upload karein ya dobara koshish karein.)"
+            f"Error: {e}. (Kripya thoda wait karke dobara koshish karein.)"
         )
 
 # Check Database stats
@@ -289,7 +289,7 @@ if st.session_state.current_test:
           index=None,
           disabled=st.session_state.test_submitted,
       )
-      st.session_state.test_answers[q["id"]] = ans
+      st.session_space.test_answers[q["id"]] = ans
       st.markdown("---")
 
     submit_btn = st.form_submit_button("Test Submit Karein")
@@ -334,6 +334,6 @@ if st.session_state.test_submitted and st.session_state.current_test:
           f" `{correct_ans}`\n\n**Spashtikaran:** {q['explanation']}"
       )
 
-  st.markdown---()
+  st.markdown("---")
   st.markdown("### Aapka Kul Score")
   st.metric(label="Score", value=f"{score} / {total}")
