@@ -8,7 +8,7 @@ st.set_page_config(
     page_title="AI Mock Test & Revision App", page_icon="📝", layout="wide"
 )
 
-st.title(📚 AI Mock Test & Revision App (Testbook Style))
+st.title("📚 AI Mock Test & Revision App (Testbook Style)")
 st.markdown(
     अपने रिटन नोट्स दें और एआई की मदद से अपनी पसंद के प्रश्नों का क्लिकेबल मॉक
      टेस्ट दें!
