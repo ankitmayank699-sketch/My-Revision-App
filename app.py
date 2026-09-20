@@ -9,6 +9,19 @@ st.set_page_config(
     page_title="AI Smart Hindi Revision App", page_icon="📚", layout="wide"
 )
 
+# Force White Background CSS
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: #FFFFFF;
+        color: #000000;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Database setup with UNIQUE constraint to prevent duplicates
 DB_FILE = "question_bank.db"
 
@@ -32,12 +45,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Hindi Revision & Mock Test App (Ultimate Edition)")
+st.title("AI Smart Hindi Revision & Mock Test App")
 st.markdown(
-    "Apne notes text, PDF, multiple images ya **camera se photo khinch kar**"
-    " upload karein. Sabhi questions **SHUDH HINDI** mein banenge, koi"
-    " duplicate nahi hoga, aur aap question bank ko poori tarah manage kar"
-    " sakenge!"
+    "Apne notes text, PDF, images ya camera se upload karein. Sabhi questions"
+    " **SHUDH HINDI** mein banenge, koi duplicate sawal save nahi hoga!"
 )
 
 # Sidebar
@@ -119,7 +130,7 @@ if build_bank_btn:
   ):
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
   elif upload_option == "Camera se Photo Khinchein" and camera_file is None:
-    st.error("Kripya pehle camera se photo khinchein!")
+    st.error("Kripya pehle camera से photo khinchein!")
   else:
     with st.spinner(
         "AI aapke data ko padh raha hai aur HINDI questions jod raha hai..."
@@ -187,7 +198,7 @@ if build_bank_btn:
 
         questions_list = json.loads(text_resp.strip())
 
-        # Save to SQLite Database using INSERT OR IGNORE
+        # Save to SQLite Database using INSERT OR IGNORE (Anti-Duplicate)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         added_count = 0
@@ -237,7 +248,7 @@ col1.metric("Bank mein Kul Prashn", total_q)
 col2.metric("Bache hue Naye Prashn", unasked_q)
 col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
 
-# --- QUESTION BANK MANAGEMENT SECTION (View, Individual Delete & Bulk Reset) ---
+# --- QUESTION BANK MANAGEMENT SECTION ---
 st.markdown("---")
 with st.expander(
     "📋 Question Bank Management (Sawal Dekhein, Ek-Ek Karke ya Sabhi Delete"
@@ -297,8 +308,8 @@ if "current_test" not in st.session_state:
   st.session_state.current_test = None
 if "test_submitted" not in st.session_state:
   st.session_state.test_submitted = False
-if "test_answers" not in st.session_state:
-  st.session_state.test_answers = {}
+if "final_answers" not in st.session_state:
+  st.session_state.final_answers = {}
 
 if start_test_btn:
   if total_q == 0:
@@ -342,7 +353,7 @@ if start_test_btn:
         })
       st.session_state.current_test = test_data
       st.session_state.test_submitted = False
-      st.session_state.test_answers = {}
+      st.session_state.final_answers = {}
       st.success(f"Aaj ka {len(test_data)} prashnon ka naya test taiyar hai!")
 
 # Render Test
@@ -353,20 +364,36 @@ if st.session_state.current_test:
   with st.form("daily_test_form"):
     for i, q in enumerate(test_q):
       st.markdown(f"**Prashn {i+1}: {q['question']}**")
+
+      default_idx = None
+      if st.session_state.test_submitted:
+        prev_ans = st.session_state.final_answers.get(q["id"])
+        if prev_ans in q["options"]:
+          default_idx = q["options"].index(prev_ans)
+
       ans = st.radio(
           f"Vikalp chunen Q{i+1}",
           q["options"],
           key=f"daily_q_{q['id']}",
-          index=None,
+          index=default_idx,
           disabled=st.session_state.test_submitted,
       )
-      st.session_state.test_answers[q["id"]] = ans
       st.markdown("---")
 
-    submit_btn = st.form_submit_button("Test Submit Karein")
+    submit_btn = (
+        False
+        if st.session_state.test_submitted
+        else st.form_submit_button("Test Submit Karein")
+    )
 
     if submit_btn:
       st.session_state.test_submitted = True
+      # Save permanent copy of answers
+      ans_dict = {}
+      for q in test_q:
+        ans_dict[q["id"]] = st.session_state.get(f"daily_q_{q['id']}")
+      st.session_state.final_answers = ans_dict
+
       conn = sqlite3.connect(DB_FILE)
       cursor = conn.cursor()
       for q in test_q:
@@ -385,14 +412,14 @@ if st.session_state.test_submitted and st.session_state.current_test:
   st.header("Test Parinam aur Solution (Results & Explanations)")
 
   for i, q in enumerate(test_q):
-    user_ans = st.session_state.test_answers.get(q["id"])
+    user_ans = st.session_state.final_answers.get(q["id"])
     correct_ans = q["correct"]
 
     if user_ans == correct_ans:
       score += 1
       st.success(
-          f"**Prashn {i+1}: Sahi!**\n\nAapka uttar: {user_ans}\n\n"
-          f"**Spashtikaran:** {q['explanation']}"
+          f"**Prashn {i+1}: Sahi!**\n\nAapka uttar: `{user_ans}`\n\n**Spashtikaran:"
+          f"** {q['explanation']}"
       )
     elif user_ans is None:
       st.warning(
@@ -401,10 +428,16 @@ if st.session_state.test_submitted and st.session_state.current_test:
       )
     else:
       st.error(
-          f"**Prashn {i+1}: Galat!**\n\nAapka uttar: {user_ans} | Sahi uttar:"
+          f"**Prashn {i+1}: Galat!**\n\nAapka uttar: `{user_ans}` | Sahi uttar:"
           f" `{correct_ans}`\n\n**Spashtikaran:** {q['explanation']}"
       )
 
   st.markdown("---")
   st.markdown("### Aapka Kul Score")
   st.metric(label="Score", value=f"{score} / {total}")
+
+  if st.button("Naya Test Shuru Karein (Reset Test State)"):
+    st.session_state.current_test = None
+    st.session_state.test_submitted = False
+    st.session_state.final_answers = {}
+    st.rerun()
