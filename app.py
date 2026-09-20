@@ -2,7 +2,7 @@ import json
 import sqlite3
 import streamlit as st
 from google import genai
-import pypdf
+from google.genai import types
 
 st.set_page_config(
     page_title="AI Smart Mock Test App", page_icon="📝", layout="wide"
@@ -31,10 +31,10 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Mock Test & Revision App (No-Repeat Daily Tests)")
+st.title("AI Smart Mock Test & Revision App (Handwritten Notes Supported)")
 st.markdown(
-    "Aapke notes se ek smart Question Bank banega, aur har roz aapko"
-    " bilkul naye aur alag mixed questions milenge!"
+    "Apne haath se likhe notes ki photo wali PDF upload karein, AI use"
+    " direct padh kar smart Question Bank bana dega!"
 )
 
 # Sidebar
@@ -53,6 +53,8 @@ with st.sidebar:
   )
 
   notes_text = ""
+  uploaded_file = None
+
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
         "Apne notes yahan paste karein:",
@@ -61,12 +63,8 @@ with st.sidebar:
     )
   else:
     uploaded_file = st.file_uploader(
-        "Notes PDF upload karein", type=["pdf"]
+        "Haath se likhe notes ki PDF upload karein", type=["pdf"]
     )
-    if uploaded_file is not None:
-      reader = pypdf.PdfReader(uploaded_file)
-      for page in reader.pages:
-        notes_text += page.extract_text() + "\n"
 
   pool_size = st.slider(
       "Question Bank mein kul kitne prashn banayein?", 50, 200, 100, step=50
@@ -77,16 +75,20 @@ with st.sidebar:
 if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
-  elif not notes_text.strip():
-    st.error("Kripya notes darj karein ya PDF upload karein!")
+  elif upload_option == "Text paste karein" and not notes_text.strip():
+    st.error("Kripya notes darj karein!")
+  elif upload_option == "PDF upload karein" and uploaded_file is None:
+    st.error("Kripya PDF file upload karein!")
   else:
     with st.spinner(
-        "AI aapke notes se ek bada Question Bank taiyar kar raha hai..."
+        "AI aapke haath se likhe notes ki PDF ko padh raha hai aur Question"
+        " Bank taiyar kar raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
+
         prompt = f"""
-                You are an expert exam creator. Based on the following study notes, generate exactly {pool_size} diverse multiple-choice questions (MCQs) covering all topics thoroughly in strict JSON format. 
+                You are an expert exam creator. Based on the provided study notes (which may contain handwritten text or images), analyze them thoroughly and generate exactly {pool_size} diverse multiple-choice questions (MCQs) covering all topics in strict JSON format. 
                 Each question must have 4 options, the correct option string (exact match with one of the options), and a detailed explanation.
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -98,15 +100,25 @@ if build_bank_btn:
                     "explanation": "Detailed explanation here."
                   }}
                 ]
-
-                Notes:
-                {notes_text[:25000]}
                 """
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
+        if upload_option == "PDF upload karein" and uploaded_file is not None:
+          pdf_bytes = uploaded_file.getvalue()
+          response = client.models.generate_content(
+              model="gemini-2.5-flash",
+              contents=[
+                  types.Part.from_bytes(
+                      data=pdf_bytes, mime_type="application/pdf"
+                  ),
+                  prompt,
+              ],
+          )
+        else:
+          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:25000]}"
+          response = client.models.generate_content(
+              model="gemini-2.5-flash",
+              contents=full_prompt,
+          )
 
         text_resp = response.text.strip()
         if text_resp.startswith("```json"):
@@ -172,11 +184,10 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apne notes dekar 'Smart Question Bank' banayein!")
+    st.warning("Pehle sidebar se apni PDF dekar 'Smart Question Bank' banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # Pehle unasked prashn chunenge taaki repeat na ho
     cursor.execute(
         "SELECT id, question, options, correct, explanation FROM questions WHERE"
         " asked = 0 ORDER BY RANDOM() LIMIT ?",
@@ -184,7 +195,6 @@ if start_test_btn:
     )
     rows = cursor.fetchall()
 
-    # Agar unasked prashn kam pad jayein, toh bank ko dobara reset kar denge
     if len(rows) < test_size:
       cursor.execute("UPDATE questions SET asked = 0")
       conn.commit()
@@ -236,7 +246,6 @@ if st.session_state.current_test:
 
     if submit_btn:
       st.session_state.test_submitted = True
-      # Mark these questions as asked in DB
       conn = sqlite3.connect(DB_FILE)
       cursor = conn.cursor()
       for q in test_q:
