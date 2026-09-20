@@ -32,12 +32,10 @@ def init_db():
 
 init_db()
 
-st.title(
-    "AI Smart Hindi Revision & Mock Test App (Camera & Anti-Duplicate Enabled)"
-)
+st.title("AI Smart Hindi Revision & Mock Test App (Advanced Manager)")
 st.markdown(
-    "Apne notes ki photo **phone camera** se kheechein ya files upload karein."
-    " **SHUDH HINDI** mein revision karein!"
+    "Apne notes upload karein. Ab aap **Question Bank dekh sakte hain** aur"
+    " kisi bhi sawal ko **ek-ek karke delete** bhi kar sakte hain!"
 )
 
 # Sidebar
@@ -52,17 +50,11 @@ with st.sidebar:
   st.markdown("---")
   st.subheader("Apne notes yahan dein:")
   upload_option = st.radio(
-      "Notes ka tarika:",
-      (
-          "Text paste karein",
-          "Files (PDF/Images) Upload karein",
-          "Phone Camera se Photo Kheechein",
-      ),
+      "Notes ka tarika:", ("Text paste karein", "Files (PDF/Images) Upload karein")
   )
 
   notes_text = ""
   uploaded_files = None
-  camera_image = None
 
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
@@ -70,31 +62,18 @@ with st.sidebar:
         height=150,
         placeholder="Apne vishay ke notes yahan likhein...",
     )
-  elif upload_option == "Files (PDF/Images) Upload karein":
+  else:
     uploaded_files = st.file_uploader(
         "Apne notes ki Photos (JPG/PNG) ya PDF select karein",
         type=["pdf", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
-  else:
-    camera_image = st.camera_input(
-        "Apne haath se likhe notes ki photo kheechein"
-    )
 
+  st.info(
+      "💡 Note: Duplicate questions automatically filter ho jayenge. Sirf naye"
+      " unique sawal judenge!"
+  )
   build_bank_btn = st.button("Smart Questions Jodein")
-
-  # Delete / Reset Question Bank
-  st.markdown("---")
-  st.subheader("Question Bank Management")
-  if st.button("🗑️ Saare Questions Delete Karein"):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM questions")
-    conn.commit()
-    conn.close()
-    st.success("Question Bank poori tarah khali kar diya gaya hai!")
-    time.sleep(1)
-    st.rerun()
 
 
 # Function with auto-retry for 503 errors
@@ -125,14 +104,8 @@ if build_bank_btn:
     st.error("Kripya apni Gemini API Key darj karein!")
   elif upload_option == "Text paste karein" and not notes_text.strip():
     st.error("Kripya notes darj karein!")
-  elif (
-      upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files
-  ):
+  elif upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files:
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
-  elif (
-      upload_option == "Phone Camera se Photo Kheechein" and camera_image is None
-  ):
-    st.error("Kripya pehle camera se photo kheechein!")
   else:
     with st.spinner(
         "AI aapke notes ko padh raha hai aur HINDI questions jod raha hai..."
@@ -141,9 +114,9 @@ if build_bank_btn:
         client = genai.Client(api_key=api_key)
 
         prompt = f"""
-                You are an expert exam creator and educator. Analyze the provided study notes, images, and documents thoroughly. 
+                You are an expert exam creator and educator. Thoroughly analyze all the provided study notes, images, and documents. 
                 CRITICAL INSTRUCTIONS:
-                1. Generate a robust, high-quality batch of multiple-choice questions (MCQs) covering all visible topics, facts, and dates. Ensure the JSON output is complete and well-formed without getting cut off.
+                1. Generate a comprehensive batch of multiple-choice questions (MCQs) covering as many topics, dates, facts, and tables as possible. Ensure JSON output is well-formed.
                 2. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -161,36 +134,33 @@ if build_bank_btn:
             max_output_tokens=8192, temperature=0.3
         )
 
-        contents_list = []
         if (
             upload_option == "Files (PDF/Images) Upload karein"
             and uploaded_files
         ):
+          contents_list = []
           for file in uploaded_files:
             file_bytes = file.getvalue()
             mime_type = file.type
             contents_list.append(
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
             )
-        elif (
-            upload_option == "Phone Camera se Photo Kheechein"
-            and camera_image is not None
-        ):
-          img_bytes = camera_image.getvalue()
-          contents_list.append(
-              types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
+          contents_list.append(prompt)
+
+          response = call_gemini_with_retry(
+              client,
+              "gemini-3.6-flash",
+              contents_list,
+              config=generation_config,
           )
         else:
-          contents_list.append(f"{prompt}\n\nNotes:\n{notes_text[:50000]}")
-
-        contents_list.append(prompt)
-
-        response = call_gemini_with_retry(
-            client,
-            "gemini-3.6-flash",
-            contents_list,
-            config=generation_config,
-        )
+          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:50000]}"
+          response = call_gemini_with_retry(
+              client,
+              "gemini-3.6-flash",
+              full_prompt,
+              config=generation_config,
+          )
 
         text_resp = response.text.strip()
         if text_resp.startswith("```json"):
@@ -229,13 +199,11 @@ if build_bank_btn:
         )
       except json.JSONDecodeError:
         st.error(
-            "Error: AI response thoda lamba hone ke karan format beech mein cut"
-            " gaya. Kripya 'Smart Questions Jodein' par dobara click karein!"
+            "Error: AI response format cut gaya. Kripya 'Smart Questions Jodein'"
+            " par dobara click karein!"
         )
       except Exception as e:
-        st.error(
-            f"Error: {e}. (Kripya thoda wait karke dobara koshish karein.)"
-        )
+        st.error(f"Error: {e}")
 
 # Check Database stats
 conn = sqlite3.connect(DB_FILE)
@@ -252,6 +220,54 @@ col1.metric("Bank mein Kul Prashn", total_q)
 col2.metric("Bache hue Naye Prashn", unasked_q)
 col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
 
+# --- QUESTION BANK MANAGEMENT SECTION (View & Individual Delete) ---
+st.markdown("---")
+with st.expander(
+    "📋 Question Bank Management (Sawal Dekhein aur Delete Karein)",
+    expanded=False,
+):
+  st.subheader("Saved Questions List")
+  conn = sqlite3.connect(DB_FILE)
+  cursor = conn.cursor()
+  cursor.execute("SELECT id, question, correct, explanation FROM questions")
+  all_questions = cursor.fetchall()
+  conn.close()
+
+  if not all_questions:
+    st.info("Question Bank abhi khali hai.")
+  else:
+    st.write(f"Kul Saved Prashn: {len(all_questions)}")
+
+    for idx, (q_id, q_text, q_correct, q_exp) in enumerate(all_questions, 1):
+      cols = st.columns([0.85, 0.15])
+      with cols[0]:
+        st.markdown(
+            f"**{idx}. {q_text}**\n\n*Sahi Uttar:* `{q_correct}`\n\n*Spashtikaran:"
+            f"* {q_exp}"
+        )
+      with cols[1]:
+        if st.button("Delete", key=f"del_q_{q_id}"):
+          conn = sqlite3.connect(DB_FILE)
+          cursor = conn.cursor()
+          cursor.execute("DELETE FROM questions WHERE id = ?", (q_id,))
+          conn.commit()
+          conn.close()
+          st.success(f"Prashn ID {q_id} delete kar diya gaya!")
+          st.rerun()
+      st.markdown("---")
+
+    # Clear All Button
+    if st.button(
+        "⚠️ Sabhi Questions Ek Saath Delete Karein (Reset Bank)", type="primary"
+    ):
+      conn = sqlite3.connect(DB_FILE)
+      cursor = conn.cursor()
+      cursor.execute("DELETE FROM questions")
+      conn.commit()
+      conn.close()
+      st.warning("Question Bank poori tarah clear kar diya gaya hai!")
+      st.rerun()
+
 # Daily Test Section
 st.markdown("---")
 st.subheader("Daily Mock Test (No-Repeat Mode)")
@@ -267,7 +283,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni files ya camera se photo dekar banayein!")
+    st.warning("Pehle sidebar se apni files dekar Question Bank banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
