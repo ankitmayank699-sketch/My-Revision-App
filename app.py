@@ -1,22 +1,45 @@
 import json
+import sqlite3
 import streamlit as st
 from google import genai
 import pypdf
-import io
 
 st.set_page_config(
-    page_title="AI Mock Test and Revision App", page_icon="📝", layout="wide"
+    page_title="AI Smart Mock Test App", page_icon="📝", layout="wide"
 )
 
-st.title("AI Mock Test and Revision App (Testbook Style)")
+# Database setup for Question Bank
+DB_FILE = "question_bank.db"
+
+
+def init_db():
+  conn = sqlite3.connect(DB_FILE)
+  cursor = conn.cursor()
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT,
+            options TEXT,
+            correct TEXT,
+            explanation TEXT,
+            asked INTEGER DEFAULT 0
+        )
+    """)
+  conn.commit()
+  conn.close()
+
+
+init_db()
+
+st.title("AI Smart Mock Test & Revision App (No-Repeat Daily Tests)")
 st.markdown(
-    "अपने रिटन नोट्स दें और एआई की मदद से अपनी पसंद के प्रश्नों का क्लिकेबल मॉक"
-    " टेस्ट दें!"
+    "Aapke notes se ek smart Question Bank banega, aur har roz aapko"
+    " bilkul naye aur alag mixed questions milenge!"
 )
 
-# Sidebar for API Key and Notes Input
+# Sidebar
 with st.sidebar:
-  st.header("Settings and Notes")
+  st.header("Settings & Notes")
   api_key = st.text_input("Google Gemini API Key darj karein", type="password")
   st.markdown(
       "[Free API Key yahan se prapt"
@@ -26,49 +49,44 @@ with st.sidebar:
   st.markdown("---")
   st.subheader("Apne notes yahan dein:")
   upload_option = st.radio(
-      "Notes dene ka tarika chunen:", ("Text paste karein", "PDF file upload karein")
+      "Notes ka tarika:", ("Text paste karein", "PDF upload karein")
   )
 
   notes_text = ""
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
-        "Yahan apne notes paste karein:",
-        height=200,
-        placeholder="Apne itihaas, vigyan ya anya vishayon ke notes yahan likhein...",
+        "Apne notes yahan paste karein:",
+        height=150,
+        placeholder="Apne vishay ke notes yahan likhein...",
     )
   else:
     uploaded_file = st.file_uploader(
-        "Apni notes PDF file upload karein", type=["pdf"]
+        "Notes PDF upload karein", type=["pdf"]
     )
     if uploaded_file is not None:
       reader = pypdf.PdfReader(uploaded_file)
       for page in reader.pages:
         notes_text += page.extract_text() + "\n"
 
-  num_questions = st.slider("Prashnon ki sankhya chunen:", 5, 40, 15)
-  generate_btn = st.button("Mock Test Generate Karein")
+  pool_size = st.slider(
+      "Question Bank mein kul kitne prashn banayein?", 50, 200, 100, step=50
+  )
+  build_bank_btn = st.button("Smart Question Bank Banayein")
 
-# Session state initialization
-if "quiz_data" not in st.session_state:
-  st.session_state.quiz_data = None
-if "submitted" not in st.session_state:
-  st.session_state.submitted = False
-if "user_answers" not in st.session_state:
-  st.session_state.user_answers = {}
-
-if generate_btn:
+# Handle Question Bank Generation
+if build_bank_btn:
   if not api_key:
     st.error("Kripya apni Gemini API Key darj karein!")
   elif not notes_text.strip():
     st.error("Kripya notes darj karein ya PDF upload karein!")
   else:
     with st.spinner(
-        "AI aapke notes se prashn taiyar kar raha hai, kripya pratiksha karein..."
+        "AI aapke notes se ek bada Question Bank taiyar kar raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
         prompt = f"""
-                You are an expert exam creator. Based on the following study notes, generate exactly {num_questions} multiple-choice questions (MCQs) in strict JSON format. 
+                You are an expert exam creator. Based on the following study notes, generate exactly {pool_size} diverse multiple-choice questions (MCQs) covering all topics thoroughly in strict JSON format. 
                 Each question must have 4 options, the correct option string (exact match with one of the options), and a detailed explanation.
                 
                 Return ONLY a valid JSON array in this exact format, with no extra text or markdown wrapping outside JSON:
@@ -82,7 +100,7 @@ if generate_btn:
                 ]
 
                 Notes:
-                {notes_text[:15000]}
+                {notes_text[:25000]}
                 """
 
         response = client.models.generate_content(
@@ -96,50 +114,148 @@ if generate_btn:
         if text_resp.endswith("```"):
           text_resp = text_resp[:-3]
 
-        quiz_data = json.loads(text_resp.strip())
-        st.session_state.quiz_data = quiz_data
-        st.session_state.submitted = False
-        st.session_state.user_answers = {}
-        st.success("Mock test safaltapoorvak taiyar ho gaya hai!")
+        questions_list = json.loads(text_resp.strip())
+
+        # Save to SQLite Database
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM questions")  # Purana bank clear karein
+        for q in questions_list:
+          cursor.execute(
+              """
+                        INSERT INTO questions (question, options, correct, explanation, asked)
+                        VALUES (?, ?, ?, ?, 0)
+                    """,
+              (
+                  q["question"],
+                  json.dumps(q["options"]),
+                  q["correct"],
+                  q["explanation"],
+              ),
+          )
+        conn.commit()
+        conn.close()
+        st.success(
+            f"Safaltapoorvak {len(questions_list)} prashnon ka Smart Question"
+            " Bank taiyar ho gaya hai!"
+        )
       except Exception as e:
         st.error(f"Error: {e}")
 
-# Display Quiz if available
-if st.session_state.quiz_data:
-  quiz = st.session_state.quiz_data
-  st.markdown("---")
-  st.subheader(f"Mock Test (Kul Prashn: {len(quiz)})")
+# Check Database stats
+conn = sqlite3.connect(DB_FILE)
+cursor = conn.cursor()
+cursor.execute("SELECT COUNT(*) FROM questions")
+total_q = cursor.fetchone()[0]
+cursor.execute("SELECT COUNT(*) FROM questions WHERE asked = 0")
+unasked_q = cursor.fetchone()[0]
+conn.close()
 
-  with st.form("quiz_form"):
-    for i, q in enumerate(quiz):
-      st.markdown(f"**Prashn {i+1}: {q['question']}**")
-      user_ans = st.radio(
-          f"Vikalp chunen (Q{i+1})",
-          q["options"],
-          key=f"q_{i}",
-          index=None,
-          disabled=st.session_state.submitted,
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+col1.metric("Bank mein Kul Prashn", total_q)
+col2.metric("Bache hue Naye Prashn", unasked_q)
+col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
+
+# Daily Test Section
+st.markdown("---")
+st.subheader("Daily Mock Test (No-Repeat Mode)")
+test_size = st.slider("Aaj ke test mein kitne prashn chahiye?", 10, 50, 40)
+start_test_btn = st.button("Aaj ka Naya Test Shuru Karein")
+
+if "current_test" not in st.session_state:
+  st.session_state.current_test = None
+if "test_submitted" not in st.session_state:
+  st.session_state.test_submitted = False
+if "test_answers" not in st.session_state:
+  st.session_state.test_answers = {}
+
+if start_test_btn:
+  if total_q == 0:
+    st.warning("Pehle sidebar se apne notes dekar 'Smart Question Bank' banayein!")
+  else:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # Pehle unasked prashn chunenge taaki repeat na ho
+    cursor.execute(
+        "SELECT id, question, options, correct, explanation FROM questions WHERE"
+        " asked = 0 ORDER BY RANDOM() LIMIT ?",
+        (test_size,),
+    )
+    rows = cursor.fetchall()
+
+    # Agar unasked prashn kam pad jayein, toh bank ko dobara reset kar denge
+    if len(rows) < test_size:
+      cursor.execute("UPDATE questions SET asked = 0")
+      conn.commit()
+      cursor.execute(
+          "SELECT id, question, options, correct, explanation FROM questions"
+          " ORDER BY RANDOM() LIMIT ?",
+          (test_size,),
       )
-      st.session_state.user_answers[i] = user_ans
+      rows = cursor.fetchall()
+
+    conn.close()
+
+    if not rows:
+      st.error("Koi prashn uplabdh nahi hai!")
+    else:
+      test_data = []
+      for r in rows:
+        test_data.append({
+            "id": r[0],
+            "question": r[1],
+            "options": json.loads(r[2]),
+            "correct": r[3],
+            "explanation": r[4],
+        })
+      st.session_state.current_test = test_data
+      st.session_state.test_submitted = False
+      st.session_state.test_answers = {}
+      st.success(f"Aaj ka {len(test_data)} prashnon ka naya test taiyar hai!")
+
+# Render Test
+if st.session_state.current_test:
+  test_q = st.session_state.current_test
+  st.markdown(f"### Mock Test (Total: {len(test_q)} Questions)")
+
+  with st.form("daily_test_form"):
+    for i, q in enumerate(test_q):
+      st.markdown(f"**Prashn {i+1}: {q['question']}**")
+      ans = st.radio(
+          f"Vikalp chunen Q{i+1}",
+          q["options"],
+          key=f"daily_q_{q['id']}",
+          index=None,
+          disabled=st.session_state.test_submitted,
+      )
+      st.session_state.test_answers[q["id"]] = ans
       st.markdown("---")
 
-    submit_test = st.form_submit_button("Test Submit Karein")
+    submit_btn = st.form_submit_button("Test Submit Karein")
 
-    if submit_test:
-      st.session_state.submitted = True
+    if submit_btn:
+      st.session_state.test_submitted = True
+      # Mark these questions as asked in DB
+      conn = sqlite3.connect(DB_FILE)
+      cursor = conn.cursor()
+      for q in test_q:
+        cursor.execute("UPDATE questions SET asked = 1 WHERE id = ?", (q["id"],))
+      conn.commit()
+      conn.close()
       st.rerun()
 
-# Show Results if submitted
-if st.session_state.submitted and st.session_state.quiz_data:
-  quiz = st.session_state.quiz_data
+# Show Results and Solutions
+if st.session_state.test_submitted and st.session_state.current_test:
+  test_q = st.session_state.current_test
   score = 0
-  total = len(quiz)
+  total = len(test_q)
 
   st.markdown("---")
-  st.header("Test Parinam aur Solution")
+  st.header("Test Parinam aur Solution (Results & Explanations)")
 
-  for i, q in enumerate(quiz):
-    user_ans = st.session_state.user_answers.get(i)
+  for i, q in enumerate(test_q):
+    user_ans = st.session_state.test_answers.get(q["id"])
     correct_ans = q["correct"]
 
     if user_ans == correct_ans:
@@ -161,4 +277,4 @@ if st.session_state.submitted and st.session_state.quiz_data:
 
   st.markdown("---")
   st.markdown("### Aapka Kul Score")
-  st.metric(label="Ank", value=f"{score} / {total}")
+  st.metric(label="Score", value=f"{score} / {total}")
