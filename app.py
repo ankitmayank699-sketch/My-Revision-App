@@ -32,10 +32,12 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Hindi Revision & Mock Test App (Advanced Manager)")
+st.title("AI Smart Hindi Revision & Mock Test App (Ultimate Edition)")
 st.markdown(
-    "Apne notes upload karein. Ab aap **Question Bank dekh sakte hain** aur"
-    " kisi bhi sawal ko **ek-ek karke delete** bhi kar sakte hain!"
+    "Apne notes text, PDF, multiple images ya **camera se photo khinch kar**"
+    " upload karein. Sabhi questions **SHUDH HINDI** mein banenge, koi"
+    " duplicate nahi hoga, aur aap question bank ko poori tarah manage kar"
+    " sakenge!"
 )
 
 # Sidebar
@@ -50,11 +52,17 @@ with st.sidebar:
   st.markdown("---")
   st.subheader("Apne notes yahan dein:")
   upload_option = st.radio(
-      "Notes ka tarika:", ("Text paste karein", "Files (PDF/Images) Upload karein")
+      "Notes ka tarika:",
+      (
+          "Text paste karein",
+          "Files (PDF/Images) Upload karein",
+          "Camera se Photo Khinchein",
+      ),
   )
 
   notes_text = ""
   uploaded_files = None
+  camera_file = None
 
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
@@ -62,12 +70,14 @@ with st.sidebar:
         height=150,
         placeholder="Apne vishay ke notes yahan likhein...",
     )
-  else:
+  elif upload_option == "Files (PDF/Images) Upload karein":
     uploaded_files = st.file_uploader(
-        "Apne notes ki Photos (JPG/PNG) ya PDF select karein",
+        "Photos (JPG/PNG/JPEG) ya PDF select karein",
         type=["pdf", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
+  else:
+    camera_file = st.camera_input("Apne notes ki photo khinchein")
 
   st.info(
       "💡 Note: Duplicate questions automatically filter ho jayenge. Sirf naye"
@@ -104,17 +114,21 @@ if build_bank_btn:
     st.error("Kripya apni Gemini API Key darj karein!")
   elif upload_option == "Text paste karein" and not notes_text.strip():
     st.error("Kripya notes darj karein!")
-  elif upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files:
+  elif (
+      upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files
+  ):
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
+  elif upload_option == "Camera se Photo Khinchein" and camera_file is None:
+    st.error("Kripya pehle camera se photo khinchein!")
   else:
     with st.spinner(
-        "AI aapke notes ko padh raha hai aur HINDI questions jod raha hai..."
+        "AI aapke data ko padh raha hai aur HINDI questions jod raha hai..."
     ):
       try:
         client = genai.Client(api_key=api_key)
 
         prompt = f"""
-                You are an expert exam creator and educator. Thoroughly analyze all the provided study notes, images, and documents. 
+                You are an expert exam creator and educator. Thoroughly analyze all the provided study notes, images, camera captures, and documents. 
                 CRITICAL INSTRUCTIONS:
                 1. Generate a comprehensive batch of multiple-choice questions (MCQs) covering as many topics, dates, facts, and tables as possible. Ensure JSON output is well-formed.
                 2. Language: Every single question, all 4 options, the correct answer string, and the detailed explanation must be written STRICTLY in the HINDI language (हिंदी भाषा में).
@@ -134,19 +148,22 @@ if build_bank_btn:
             max_output_tokens=8192, temperature=0.3
         )
 
-        if (
-            upload_option == "Files (PDF/Images) Upload karein"
-            and uploaded_files
-        ):
-          contents_list = []
+        contents_list = []
+        if upload_option == "Files (PDF/Images) Upload karein":
           for file in uploaded_files:
             file_bytes = file.getvalue()
             mime_type = file.type
             contents_list.append(
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
             )
-          contents_list.append(prompt)
+        elif upload_option == "Camera se Photo Khinchein":
+          cam_bytes = camera_file.getvalue()
+          contents_list.append(
+              types.Part.from_bytes(data=cam_bytes, mime_type="image/jpeg")
+          )
 
+        if contents_list:
+          contents_list.append(prompt)
           response = call_gemini_with_retry(
               client,
               "gemini-3.6-flash",
@@ -199,8 +216,8 @@ if build_bank_btn:
         )
       except json.JSONDecodeError:
         st.error(
-            "Error: AI response format cut gaya. Kripya 'Smart Questions Jodein'"
-            " par dobara click karein!"
+            "Error: AI response format cut gaya. Kripya 'Smart Questions"
+            " Jodein' par dobara click karein!"
         )
       except Exception as e:
         st.error(f"Error: {e}")
@@ -220,13 +237,14 @@ col1.metric("Bank mein Kul Prashn", total_q)
 col2.metric("Bache hue Naye Prashn", unasked_q)
 col3.metric("Puche ja chuke Prashn", total_q - unasked_q)
 
-# --- QUESTION BANK MANAGEMENT SECTION (View & Individual Delete) ---
+# --- QUESTION BANK MANAGEMENT SECTION (View, Individual Delete & Bulk Reset) ---
 st.markdown("---")
 with st.expander(
-    "📋 Question Bank Management (Sawal Dekhein aur Delete Karein)",
+    "📋 Question Bank Management (Sawal Dekhein, Ek-Ek Karke ya Sabhi Delete"
+    " Karein)",
     expanded=False,
 ):
-  st.subheader("Saved Questions List")
+  st.subheader("Feed kiye gaye sabhi Prashn (Saved Questions)")
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   cursor.execute("SELECT id, question, correct, explanation FROM questions")
@@ -242,8 +260,8 @@ with st.expander(
       cols = st.columns([0.85, 0.15])
       with cols[0]:
         st.markdown(
-            f"**{idx}. {q_text}**\n\n*Sahi Uttar:* `{q_correct}`\n\n*Spashtikaran:"
-            f"* {q_exp}"
+            f"**{idx}. (ID: {q_id}) {q_text}**\n\n*Sahi Uttar:*"
+            f" `{q_correct}`\n\n*Spashtikaran:* {q_exp}"
         )
       with cols[1]:
         if st.button("Delete", key=f"del_q_{q_id}"):
@@ -258,7 +276,8 @@ with st.expander(
 
     # Clear All Button
     if st.button(
-        "⚠️ Sabhi Questions Ek Saath Delete Karein (Reset Bank)", type="primary"
+        "⚠️ Sabhi Questions Ek Saath Delete Karein (Reset Bank)",
+        type="primary",
     ):
       conn = sqlite3.connect(DB_FILE)
       cursor = conn.cursor()
@@ -283,7 +302,10 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar se apni files dekar Question Bank banayein!")
+    st.warning(
+        "Pehle sidebar se text, files ya camera se photo dekar Question Bank"
+        " banayein!"
+    )
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
