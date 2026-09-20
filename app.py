@@ -32,10 +32,12 @@ def init_db():
 
 init_db()
 
-st.title("AI Smart Hindi Revision & Mock Test App (Error-Free)")
+st.title(
+    "AI Smart Hindi Revision & Mock Test App (Camera & Anti-Duplicate Enabled)"
+)
 st.markdown(
-    "Apne notes upload karein. App bina kisi truncation error ke **SHUDH"
-    " HINDI** mein naye sawal jodne ke liye tayar hai!"
+    "Apne notes ki photo **phone camera** se kheechein ya files upload karein."
+    " **SHUDH HINDI** mein revision karein!"
 )
 
 # Sidebar
@@ -50,11 +52,17 @@ with st.sidebar:
   st.markdown("---")
   st.subheader("Apne notes yahan dein:")
   upload_option = st.radio(
-      "Notes ka tarika:", ("Text paste karein", "Files (PDF/Images) Upload karein")
+      "Notes ka tarika:",
+      (
+          "Text paste karein",
+          "Files (PDF/Images) Upload karein",
+          "Phone Camera se Photo Kheechein",
+      ),
   )
 
   notes_text = ""
   uploaded_files = None
+  camera_image = None
 
   if upload_option == "Text paste karein":
     notes_text = st.text_area(
@@ -62,18 +70,31 @@ with st.sidebar:
         height=150,
         placeholder="Apne vishay ke notes yahan likhein...",
     )
-  else:
+  elif upload_option == "Files (PDF/Images) Upload karein":
     uploaded_files = st.file_uploader(
         "Apne notes ki Photos (JPG/PNG) ya PDF select karein",
         type=["pdf", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
+  else:
+    camera_image = st.camera_input(
+        "Apne haath se likhe notes ki photo kheechein"
+    )
 
-  st.info(
-      "💡 Note: Duplicate questions automatically filter ho jayenge. Agar zyada"
-      " sawal chahiye toh button ko do baar click kar sakte hain!"
-  )
   build_bank_btn = st.button("Smart Questions Jodein")
+
+  # Delete / Reset Question Bank
+  st.markdown("---")
+  st.subheader("Question Bank Management")
+  if st.button("🗑️ Saare Questions Delete Karein"):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM questions")
+    conn.commit()
+    conn.close()
+    st.success("Question Bank poori tarah khali kar diya gaya hai!")
+    time.sleep(1)
+    st.rerun()
 
 
 # Function with auto-retry for 503 errors
@@ -104,8 +125,14 @@ if build_bank_btn:
     st.error("Kripya apni Gemini API Key darj karein!")
   elif upload_option == "Text paste karein" and not notes_text.strip():
     st.error("Kripya notes darj karein!")
-  elif upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files:
+  elif (
+      upload_option == "Files (PDF/Images) Upload karein" and not uploaded_files
+  ):
     st.error("Kripya kam se kam ek PDF ya Image file upload karein!")
+  elif (
+      upload_option == "Phone Camera se Photo Kheechein" and camera_image is None
+  ):
+    st.error("Kripya pehle camera se photo kheechein!")
   else:
     with st.spinner(
         "AI aapke notes ko padh raha hai aur HINDI questions jod raha hai..."
@@ -134,33 +161,36 @@ if build_bank_btn:
             max_output_tokens=8192, temperature=0.3
         )
 
+        contents_list = []
         if (
             upload_option == "Files (PDF/Images) Upload karein"
             and uploaded_files
         ):
-          contents_list = []
           for file in uploaded_files:
             file_bytes = file.getvalue()
             mime_type = file.type
             contents_list.append(
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
             )
-          contents_list.append(prompt)
-
-          response = call_gemini_with_retry(
-              client,
-              "gemini-3.6-flash",
-              contents_list,
-              config=generation_config,
+        elif (
+            upload_option == "Phone Camera se Photo Kheechein"
+            and camera_image is not None
+        ):
+          img_bytes = camera_image.getvalue()
+          contents_list.append(
+              types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
           )
         else:
-          full_prompt = f"{prompt}\n\nNotes:\n{notes_text[:50000]}"
-          response = call_gemini_with_retry(
-              client,
-              "gemini-3.6-flash",
-              full_prompt,
-              config=generation_config,
-          )
+          contents_list.append(f"{prompt}\n\nNotes:\n{notes_text[:50000]}")
+
+        contents_list.append(prompt)
+
+        response = call_gemini_with_retry(
+            client,
+            "gemini-3.6-flash",
+            contents_list,
+            config=generation_config,
+        )
 
         text_resp = response.text.strip()
         if text_resp.startswith("```json"):
@@ -199,7 +229,7 @@ if build_bank_btn:
         )
       except json.JSONDecodeError:
         st.error(
-            "Error: AI response thoda lamba hone ke कारण format beech mein cut"
+            "Error: AI response thoda lamba hone ke karan format beech mein cut"
             " gaya. Kripya 'Smart Questions Jodein' par dobara click karein!"
         )
       except Exception as e:
@@ -237,7 +267,7 @@ if "test_answers" not in st.session_state:
 
 if start_test_btn:
   if total_q == 0:
-    st.warning("Pehle sidebar से अपनी files देकर Question Bank बनाएं!")
+    st.warning("Pehle sidebar se apni files ya camera se photo dekar banayein!")
   else:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
